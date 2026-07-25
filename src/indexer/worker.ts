@@ -5,6 +5,7 @@ import {
   initCursor,
   applyEventBatchAndAdvanceCursor,
 } from "../db/indexerRepository.js";
+import { dispatchDueWebhooks } from "../services/webhookDispatcher.js";
 
 export interface IndexerConfig {
   contractId: string;
@@ -91,6 +92,7 @@ export async function indexOnce(config: IndexerConfig): Promise<void> {
 
     lastLedger = to;
   }
+  await dispatchDueWebhooks();
 }
 
 /**

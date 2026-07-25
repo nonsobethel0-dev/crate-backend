@@ -2,6 +2,7 @@ import { pool } from "./client.js";
 import { incrementSales } from "./sampleRepository.js";
 import type { DecodedEvent } from "../indexer/types.js";
 import type { Pool } from "pg";
+import { enqueueSaleDelivery } from "./webhookRepository.js";
 
 // Every function here defaults to the shared pool but accepts an injectable
 // Pool — lets tests run this exact code against a pg-mem instance instead of
@@ -109,6 +110,25 @@ export async function applyEventBatchAndAdvanceCursor(
              updated_at = NOW()`,
           [contractId, event.price],
         );
+        // Webhook delivery is an optional migration for deployments upgrading
+        // from the indexer schema. Keep sale accounting usable while that
+        // migration is being applied.
+        try {
+          const producer = await client.query<{ uploader: string }>("SELECT uploader FROM samples WHERE id = $1", [event.sampleId]);
+          if (producer.rows[0]) {
+            await enqueueSaleDelivery(`${event.ledger}:${event.txHash}:${event.eventIndex}`, producer.rows[0].uploader, {
+              event: "sale",
+              eventId: `${event.ledger}:${event.txHash}:${event.eventIndex}`,
+              sampleId: event.sampleId.toString(),
+              buyer: event.buyer,
+              price: event.price.toString(),
+              ledger: event.ledger,
+              occurredAt: event.ledgerClosedAt,
+            }, client);
+          }
+        } catch (err) {
+          console.warn("[indexerRepository] webhook migration unavailable; sale delivery was not enqueued", err);
+        }
       } else {
         // Mirrors the contract's own Producer(Address) flag: only count a
         // producer toward total_producers the first time we see them upload.
