@@ -5,6 +5,7 @@ import { ClientManager } from "./clientManager.js";
 import { authenticateWsUpgrade } from "./auth.js";
 import { handleMessage } from "./channels.js";
 import type { WsClient, WsOutboundMessage } from "./types.js";
+import { WS_HEARTBEAT_INTERVAL_MS } from "./types.js";
 import { bigIntReplacer } from "../utils/bigint.js";
 
 let wss: WebSocketServer | null = null;
@@ -95,6 +96,27 @@ export function initWebSocket(server: Server): WebSocketServer {
     const welcome: WsOutboundMessage = { type: "connected", clientId: client.id };
     ws.send(JSON.stringify(welcome, bigIntReplacer));
   });
+
+  // Heartbeat: ping all clients, terminate those that don't respond
+  const heartbeatInterval = setInterval(() => {
+    if (!wss) return;
+    for (const ws of wss.clients) {
+      if (!ws.isAlive) {
+        ws.terminate();
+        continue;
+      }
+      ws.isAlive = false;
+      ws.ping();
+    }
+    // Also clean up stale clients from the manager
+    for (const client of manager!.getStaleClients()) {
+      console.log(`[ws] terminating stale client ${client.id}`);
+      client.socket.terminate();
+      manager!.remove(client.id);
+    }
+  }, WS_HEARTBEAT_INTERVAL_MS);
+
+  wss.on("close", () => clearInterval(heartbeatInterval));
 
   return wss;
 }
