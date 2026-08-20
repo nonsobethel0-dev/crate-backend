@@ -12,6 +12,7 @@ import { moderationRouter } from "./routes/moderation.js";
 import { webhooksRouter } from "./routes/webhooks.js";
 import { pool, checkDbConnection } from "./db/client.js";
 import { bigIntReplacer } from "./utils/bigint.js";
+import { initWebSocket } from "./ws/server.js";
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -57,7 +58,11 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   });
 });
 
-const server = app.listen(PORT, () => console.log(`Crate API running on :${PORT}`));
+const server = app.listen(PORT, () => {
+  console.log(`Crate API running on :${PORT}`);
+  initWebSocket(server);
+  console.log("[ws] WebSocket server ready on /ws");
+});
 server.on("error", (err: NodeJS.ErrnoException) => {
   console.error("[fatal] server error", err.message);
   process.exit(1);
