@@ -13,7 +13,8 @@ import { webhooksRouter } from "./routes/webhooks.js";
 import { wsRouter } from "./routes/ws.js";
 import { pool, checkDbConnection } from "./db/client.js";
 import { bigIntReplacer } from "./utils/bigint.js";
-import { initWebSocket } from "./ws/server.js";
+import { initWebSocket, getManager, getWss } from "./ws/server.js";
+import { startEventListener, stopEventListener } from "./ws/eventBus.js";
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -60,22 +61,52 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   });
 });
 
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, async () => {
   console.log(`Crate API running on :${PORT}`);
   initWebSocket(server);
   console.log("[ws] WebSocket server ready on /ws");
+  try {
+    await startEventListener();
+  } catch (err) {
+    console.error("[ws] failed to start event listener (WebSocket events will not work)", err);
+  }
 });
 server.on("error", (err: NodeJS.ErrnoException) => {
   console.error("[fatal] server error", err.message);
   process.exit(1);
 });
 
-function gracefulShutdown(signal: string) {
-  console.log(`[shutdown] ${signal} received, draining pool...`);
-  pool.end().then(() => {
-    console.log("[shutdown] pool closed.");
-    process.exit(0);
-  });
+async function gracefulShutdown(signal: string) {
+  console.log(`[shutdown] ${signal} received, draining...`);
+
+  // Close all WebSocket connections
+  try {
+    const mgr = getManager();
+    for (const client of mgr.getAll()) {
+      client.socket.close(1001, "Server shutting down");
+    }
+  } catch {
+    // WS server may not be initialized
+  }
+
+  // Stop the PostgreSQL event listener
+  await stopEventListener().catch(() => {});
+
+  // Close the WebSocket server
+  const wss = getWss();
+  if (wss) {
+    await new Promise<void>((resolve) => wss!.close(() => resolve()));
+    console.log("[shutdown] WebSocket server closed.");
+  }
+
+  // Close the HTTP server
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  console.log("[shutdown] HTTP server closed.");
+
+  // Drain the DB pool
+  await pool.end();
+  console.log("[shutdown] pool closed.");
+  process.exit(0);
 }
 
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
