@@ -129,6 +129,33 @@ export async function applyEventBatchAndAdvanceCursor(
         } catch (err) {
           console.warn("[indexerRepository] webhook migration unavailable; sale delivery was not enqueued", err);
         }
+        // WebSocket notifications — best-effort, must not roll back the batch
+        try {
+          const producer = await client.query<{ uploader: string }>(
+            "SELECT uploader FROM samples WHERE id = $1",
+            [event.sampleId],
+          );
+          if (producer.rows[0]) {
+            const saleData = {
+              eventId: `${event.ledger}:${event.txHash}:${event.eventIndex}`,
+              sampleId: event.sampleId.toString(),
+              buyer: event.buyer,
+              price: event.price.toString(),
+              ledger: event.ledger,
+              occurredAt: event.ledgerClosedAt,
+            };
+            await client.query("SELECT pg_notify($1, $2)", [
+              "crate_ws_events",
+              JSON.stringify({ type: "sale", channel: `sale:${producer.rows[0].uploader}`, data: saleData }),
+            ]);
+            await client.query("SELECT pg_notify($1, $2)", [
+              "crate_ws_events",
+              JSON.stringify({ type: "sale", channel: "marketplace", data: saleData }),
+            ]);
+          }
+        } catch (err) {
+          console.warn("[indexerRepository] WebSocket notification failed", err);
+        }
       } else {
         // Mirrors the contract's own Producer(Address) flag: only count a
         // producer toward total_producers the first time we see them upload.
@@ -148,6 +175,43 @@ export async function applyEventBatchAndAdvanceCursor(
              updated_at = NOW()`,
           [contractId, isNewProducer ? 1 : 0],
         );
+        // WebSocket notifications — best-effort
+        try {
+          await client.query("SELECT pg_notify($1, $2)", [
+            "crate_ws_events",
+            JSON.stringify({
+              type: "upload",
+              channel: "marketplace",
+              data: {
+                sampleId: event.sampleId.toString(),
+                uploader: event.uploader,
+                ledger: event.ledger,
+                occurredAt: event.ledgerClosedAt,
+              },
+            }),
+          ]);
+          const statsRow = await client.query<{ total_samples: number; total_volume: bigint; total_producers: number }>(
+            "SELECT total_samples, total_volume, total_producers FROM platform_stats WHERE contract_id = $1",
+            [contractId],
+          );
+          if (statsRow.rows[0]) {
+            const s = statsRow.rows[0];
+            await client.query("SELECT pg_notify($1, $2)", [
+              "crate_ws_events",
+              JSON.stringify({
+                type: "stats",
+                channel: "stats",
+                data: {
+                  totalSamples: s.total_samples,
+                  totalVolume: s.total_volume.toString(),
+                  totalProducers: s.total_producers,
+                },
+              }),
+            ]);
+          }
+        } catch (err) {
+          console.warn("[indexerRepository] WebSocket notification failed", err);
+        }
       }
     }
 
