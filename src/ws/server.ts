@@ -101,11 +101,12 @@ export function initWebSocket(server: Server): WebSocketServer {
   const heartbeatInterval = setInterval(() => {
     if (!wss) return;
     for (const ws of wss.clients) {
-      if (!ws.isAlive) {
+      const alive = (ws as any).isAlive as boolean | undefined;
+      if (alive === false) {
         ws.terminate();
         continue;
       }
-      ws.isAlive = false;
+      (ws as any).isAlive = false;
       ws.ping();
     }
     // Also clean up stale clients from the manager
