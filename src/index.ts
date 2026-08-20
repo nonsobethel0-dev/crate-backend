@@ -10,6 +10,7 @@ import { analyticsRouter } from "./routes/analytics.js";
 import { royaltiesRouter } from "./routes/royalties.js";
 import { moderationRouter } from "./routes/moderation.js";
 import { webhooksRouter } from "./routes/webhooks.js";
+import { wsRouter } from "./routes/ws.js";
 import { pool, checkDbConnection } from "./db/client.js";
 import { bigIntReplacer } from "./utils/bigint.js";
 import { initWebSocket } from "./ws/server.js";
@@ -45,6 +46,7 @@ app.use("/api/ipfs", ipfsRouter);
 app.use("/api/analytics", analyticsRouter);
 app.use("/api/moderation", moderationRouter);
 app.use("/api/webhooks", webhooksRouter);
+app.use("/api/ws", wsRouter);
 
 app.use((_req: Request, res: Response) => {
   res.status(404).json({ ok: false, error: "Not found" });
