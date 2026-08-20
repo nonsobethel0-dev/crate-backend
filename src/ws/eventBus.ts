@@ -5,6 +5,7 @@ import type { WsNotification } from "./types.js";
 const CHANNEL = "crate_ws_events";
 
 let listenerClient: pg.Client | null = null;
+let reconnecting = false;
 
 export async function startEventListener(): Promise<void> {
   listenerClient = new pg.Client({ connectionString: process.env.DATABASE_URL });
@@ -27,10 +28,19 @@ export async function startEventListener(): Promise<void> {
 
   listenerClient.on("error", (err) => {
     console.error("[ws:eventBus] listener connection error", err.message);
-    setTimeout(() => {
-      startEventListener().catch((e) =>
-        console.error("[ws:eventBus] reconnect failed", e.message),
-      );
+    if (reconnecting) return;
+    reconnecting = true;
+    // Close the old client before reconnecting
+    listenerClient?.end().catch(() => {});
+    listenerClient = null;
+    setTimeout(async () => {
+      try {
+        await startEventListener();
+      } catch (e) {
+        console.error("[ws:eventBus] reconnect failed", e);
+      } finally {
+        reconnecting = false;
+      }
     }, 5_000);
   });
 

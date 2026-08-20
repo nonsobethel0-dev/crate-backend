@@ -81,6 +81,7 @@ export function initWebSocket(server: Server): WebSocketServer {
     });
 
     ws.on("pong", () => {
+      (ws as any).isAlive = true;
       manager!.markAlive(client.id);
     });
 
